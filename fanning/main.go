@@ -6,7 +6,10 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
+	"runtime"
 	"sync"
+	"time"
 )
 
 func gen(nums ...int) chan int {
@@ -32,15 +35,24 @@ func sq(in chan int) chan int {
 }
 
 func main() {
-	in := gen(2, 3)
+	rand.Seed(time.Now().Unix())
+	var nums []int
+	for i := 0; i < 100; i++ {
+		nums = append(nums, rand.Intn(100))
+	}
 
-	// Distribute the sq work across two goroutines that both read from in.
-	c1 := sq(in)
-	c2 := sq(in)
+	in := gen(nums...)
 
-	// Consume the merged output from c1 and c2.
-	for n := range merge(c1, c2) {
-		fmt.Println(n) // 4 then 9, or 9 then 4
+	// Distribute the sq work across runtime.NumCPU() val of goroutines
+	var cs []chan int
+	for i := 0; i < runtime.NumCPU(); i++ {
+		fmt.Printf("starting worker: %v\n", i+1)
+		cs = append(cs, sq(in))
+	}
+
+	// Consume the merged output from all channels
+	for n := range merge(cs...) {
+		fmt.Println(n)
 	}
 }
 
