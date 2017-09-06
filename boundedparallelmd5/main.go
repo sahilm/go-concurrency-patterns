@@ -4,7 +4,8 @@ import (
 	"crypto/md5"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,10 +29,10 @@ func main() {
 
 }
 
-func MD5All(root string) (map[string][md5.Size]byte, error) {
+func MD5All(root string) (map[string][]byte, error) {
 	c := make(chan result)
 	var wg sync.WaitGroup
-	numDigesters := 20
+	numDigesters := 10
 	wg.Add(numDigesters)
 
 	done := make(chan struct{})
@@ -48,10 +49,10 @@ func MD5All(root string) (map[string][md5.Size]byte, error) {
 		close(c)
 	}()
 
-	m := make(map[string][md5.Size]byte)
+	m := make(map[string][]byte)
 	for r := range c {
 		if r.err != nil {
-			return nil, r.err
+			log.Println(r.err)
 		}
 		m[r.path] = r.sum
 	}
@@ -90,15 +91,37 @@ func walkFiles(done <-chan struct{}, root string) (<-chan string, <-chan error) 
 
 type result struct {
 	path string
-	sum  [md5.Size]byte
+	sum  []byte
 	err  error
 }
 
 func digester(done <-chan struct{}, paths <-chan string, c chan<- result) {
+	sumFile := func(file *os.File) ([]byte, error) {
+		defer file.Close()
+		h := md5.New()
+		if _, err := io.Copy(h, file); err != nil {
+			return nil, err
+		}
+		return h.Sum(nil), nil
+	}
+
 	for path := range paths {
-		data, err := ioutil.ReadFile(path)
+		r := result{path: path}
+
+		file, err := os.Open(path)
+		var sum []byte
+		if err != nil {
+			r.err = err
+		} else {
+			sum, err = sumFile(file)
+			if err != nil {
+				r.err = err
+			} else {
+				r.sum = sum
+			}
+		}
 		select {
-		case c <- result{path, md5.Sum(data), err}:
+		case c <- r:
 		case <-done:
 			return
 		}
